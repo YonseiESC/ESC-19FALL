@@ -1,0 +1,182 @@
+```{r}
+#package needed
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(coda)
+library(MCMCpack)
+```
+
+
+```{r}
+#data through url
+ schools.list = lapply(1:8, function(i) { 
+   s.tbl = paste0('http://www.stat.washington.edu/people/pdhoff/Book/Data/hwdata/school', i, '.dat') %>% url %>% read.table 
+   
+   data.frame( 
+     school = i, 
+     hours = s.tbl[, 1] %>% as.numeric 
+   ) 
+ }) 
+  
+ schools.raw = do.call(rbind, schools.list) 
+  
+ Y = schools.raw 
+
+```
+
+
+```{r}
+#prior setting
+mu0 <- 7; gamma0sq <-5; tau0sq <-10; eta0<-2; sigma0sq <- 15; nu0<-2
+```
+
+a
+```{r}
+# Matirx Storing each mu
+S = 2000
+THETA = matrix(nrow = S, ncol = 8) 
+# Matrix Storing sigma, mu, theta 
+SMT = matrix(nrow = S, ncol = 3) 
+colnames(SMT) = c('sigmasq', 'mu', 'tausq') 
+
+#Init values
+n <- sv <- ybar <- rep(0, 8)
+for (j in 1:8) {
+  Y_j <- Y[Y[,1] == j, 2]
+  ybar[j] <- mean(Y_j)
+  sv[j] <- var(Y_j)
+  n[j] <- length(Y_j)
+}
+theta <- ybar
+sigmasq <- mean(theta)
+mu <- mean(theta)
+tausq <- var(theta)
+
+#MCMC
+for (s in 1:S) {
+  ##thetas
+  for (j in 1:8) {
+    var.theta <- 1 / (n[j] / sigmasq + 1/ tausq)
+    ex.theta <- var.theta * (ybar[j] * n[j] / sigmasq + mu/tausq)
+    theta[j] <- rnorm(1, ex.theta, sqrt(var.theta))
+  }
+  
+  ##Pooled Varinace
+  nun <- nu0 + sum(n)
+  ss <- nu0* sigma0sq
+  for (j in 1:8) {
+    ss <- ss + sum((Y[Y[,1]==j,2] - theta[j])^2)
+  }
+  sigmasq <- 1 / rgamma(1, nun/2 , ss/2)
+  
+  ##Sample mu
+  var.mu <- 1/ (8/tausq + 1/gamma0sq)
+  ex.mu <- var.mu * (8 * mean(theta) / tausq + mu0/gamma0sq )
+  mu <- rnorm(1, ex.mu, sqrt(var.mu))
+  
+  ##Sample tausq
+  etam <- eta0 + 8
+  ss <- eta0 * tau0sq + sum((theta - mu)^2)
+  tausq <- 1 / rgamma(1,etam/2 , ss/2)
+  
+  ##Store parameters
+  THETA[s,] <- theta
+  SMT[s,] <- c(sigmasq,mu,tausq)
+}
+```
+
+```{r}
+#Assess convergence
+ smt.df = data.frame(SMT) 
+ colnames(smt.df) = c('sigma2', 'mu', 'tau2') 
+ smt.df$s = 1:S 
+  
+ cut_size = 10 
+  
+ smt.df = smt.df %>% 
+   tbl_df %>% 
+   mutate(scut = cut(s, breaks = cut_size)) %>% 
+   gather('variable', 'value', sigma2:tau2) 
+  
+ ggplot(smt.df, aes(x = scut, y = value)) + 
+   facet_wrap(~ variable, scales = 'free_y') + 
+   geom_boxplot() + 
+   theme(axis.text.x = element_blank()) + 
+   xlab('Samples') ##seems like achieved stationary...
+
+ #Obtain effectivesize
+ effectiveSize(SMT[,1])
+ effectiveSize(SMT[,2])
+ effectiveSize(SMT[,3])
+```
+
+b
+```{r}
+#Posterior mean and CI
+mean(SMT[,1]) ;mean(SMT[,2]) ;mean(SMT[,3])
+
+quantile(SMT[,1], probs = c(0.025, 0.975))
+quantile(SMT[,2], probs = c(0.025, 0.975))
+quantile(SMT[,3], probs = c(0.025, 0.975))
+```
+
+```{r}
+#Density Comparision
+##prior df
+sigmasq.df = data.frame( 
+   sigma2 = seq(9, 22, by = 0.1), 
+   density_sigma2 = dinvgamma(seq(9, 22, by = 0.1), nu0 / 2, nu0 * sigma0sq / 2))
+tausq.df <- data.frame(
+  tau2 = seq(0, 45, by=0.1),
+  density_tau2 = dinvgamma(seq(0, 45, by=0.1), eta0/2, eta0*tau0sq/2)
+)
+mu.df <- data.frame(
+  mu = seq(4, 11, by=0.1),
+  density_mu = dnorm(seq(4, 11, by=0.1), mu0, sqrt(gamma0sq))
+) ###boundary is set based on posterior plot
+
+##Comparision
+SMT.df <- as.data.frame(SMT)
+ggplot(sigmasq.df, aes(x=sigma2, y=density_sigma2)) + geom_line()
+ggplot(SMT.df) + geom_density( aes(x=SMT.df[,1]))
+ggplot(tausq.df, aes(x=tau2, y=density_tau2)) + geom_line()
+ggplot(SMT.df) + geom_density( aes(x=SMT.df[,3]))
+
+ggplot(mu.df, aes(x=mu, y=density_mu)) + geom_line()
+ggplot(SMT.df) + geom_density( aes(x=SMT.df[,2])) ###more shape and different mean. quite different distribution in sigma2
+
+```
+
+c
+```{r}
+#Posteiror R
+Rpost.df <- data.frame(Rpost = SMT.df[,3] / (SMT.df[,1] + SMT.df[,3]))
+ggplot(Rpost.df) + geom_density( aes(x=Rpost))
+
+#Prior R
+tau2 <- rinvgamma(1000, eta0/2, eta0*tau0sq/2)
+sig2 <- rinvgamma(1000, nu0 / 2, nu0 * sigma0sq / 2)
+Rprior <- tau2 / (tau2 + sig2)
+Rprior.df <- as.data.frame(Rprior)
+ggplot(Rprior.df) + geom_density(aes(x=Rprior))
+
+##eividence from data : tau2 / sigma2 raion is smaller than we expected ...?
+```
+
+d
+```{r}
+#theta7 < theta6 Using MC approxi
+sum(THETA[,7] < THETA[,6]) / nrow(THETA)
+
+#theta7 is smallest vlaue
+sum(rowSums(THETA[,7]  < THETA[,-7]) == 7) / nrow(THETA)
+```
+
+e
+```{r}
+Y %>% group_by(school) %>% summarise(mean(hours))
+colSums(THETA)/nrow(THETA) 
+
+mean(Y$hours) ; mean(THETA)
+```
