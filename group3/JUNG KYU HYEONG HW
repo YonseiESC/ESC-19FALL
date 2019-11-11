@@ -1,0 +1,136 @@
+JAGS를 이용한 풀이
+Hw
+JUNG
+2019 11 7
+데이터 로드
+
+library(dplyr)
+## 
+## Attaching package: 'dplyr'
+## The following objects are masked from 'package:stats':
+## 
+##     filter, lag
+## The following objects are masked from 'package:base':
+## 
+##     intersect, setdiff, setequal, union
+library(ggplot2)
+library(tidyr)
+schools.list = lapply(1:8, function(i) {
+  s.tbl = paste0('http://www.stat.washington.edu/people/pdhoff/Book/Data/hwdata/school', i, '.dat') %>%
+    url %>%
+    read.table
+  
+  data.frame(
+    school = i,
+    hours = s.tbl[, 1] %>% as.numeric
+  )
+})
+schools.raw = do.call(rbind, schools.list)
+school = schools.raw
+모델
+
+modelString <- "
+model{
+
+## likelihood
+for (i in 1:N){
+y[i] ~ dnorm(mu_j[school[i]], invsigma2)
+}
+
+##hyperprior
+mu ~ dnorm(mu0, 1/g0^2)
+invtau2 ~ dgamma(a_t, b_t)
+tau <- sqrt(pow(invtau2, -1))
+
+##prior
+for (j in 1:J){
+mu_j[j] ~ dnorm(mu, invtau2)
+}
+invsigma2 ~ dgamma(a_g, b_g)
+sigma <- sqrt(pow(invsigma2, -1))
+}
+"
+y <- school %>% 
+  pull(hours)
+school <- school %>% pull(school)
+N <- length(y)
+J <- length(unique(school))
+
+initsfunction <- function(chain){
+  .RNG.seed <- c(1,2)[chain]
+  .RNG.name <- c('base::Super-Duper',
+                 'base::Wichmann-Hill')[chain]
+  return(list(.RNG.seed=.RNG.seed,
+              .RNG.name=.RNG.name))
+}
+
+the_data <- list('y'=y, 'school'=school, 'N'=N, 'J'=J,
+                 'mu0'=7, 'g0'=5,
+                 'a_t'=10, 'b_t'=2,
+                 'a_g'=15, 'b_g'=2)
+
+library(runjags)
+## 
+## Attaching package: 'runjags'
+## The following object is masked from 'package:tidyr':
+## 
+##     extract
+runjags.options(silent.runjags=TRUE, silent.jags=TRUE)
+posterior <- run.jags(modelString,
+                      n.chains = 1,
+                      data = the_data,
+                      monitor = c('mu', 'tau', 'mu_j', 'sigma'),
+                      adapt = 1000,
+                      burnin = 5000,
+                      sample = 1000,
+                      thin = 1,
+                      inits = initsfunction)
+## Loading required namespace: rjags
+## Warning: Convergence cannot be assessed with only 1 chain
+options(digits = 2)
+summary(posterior)
+##         Lower95 Median Upper95 Mean   SD Mode  MCerr MC%ofSD SSeff  AC.10
+## mu         7.06   7.70    8.29 7.70 0.32   NA 0.0209     6.5   233 -0.012
+## tau        0.36   0.53    0.78 0.54 0.11   NA 0.0062     5.6   319  0.019
+## mu_j[1]    7.28   8.29    9.22 8.31 0.51   NA 0.0271     5.3   352  0.019
+## mu_j[2]    6.52   7.48    8.39 7.48 0.47   NA 0.0225     4.7   444 -0.016
+## mu_j[3]    6.85   7.75    8.78 7.77 0.50   NA 0.0214     4.3   538 -0.023
+## mu_j[4]    6.17   7.21    8.14 7.19 0.50   NA 0.0242     4.8   430 -0.010
+## mu_j[5]    7.63   8.73    9.84 8.75 0.56   NA 0.0300     5.3   351 -0.004
+## mu_j[6]    6.24   7.23    8.19 7.25 0.50   NA 0.0246     4.9   413  0.014
+## mu_j[7]    6.22   7.20    8.20 7.21 0.50   NA 0.0252     5.0   400 -0.034
+## mu_j[8]    6.79   7.61    8.62 7.62 0.48   NA 0.0193     4.0   627 -0.030
+## sigma      3.29   3.61    3.96 3.62 0.18   NA 0.0059     3.3   902 -0.023
+##         psrf
+## mu        NA
+## tau       NA
+## mu_j[1]   NA
+## mu_j[2]   NA
+## mu_j[3]   NA
+## mu_j[4]   NA
+## mu_j[5]   NA
+## mu_j[6]   NA
+## mu_j[7]   NA
+## mu_j[8]   NA
+## sigma     NA
+plot확인
+
+plot(posterior, vars = 'mu_j[1]')
+
+
+plot(posterior, vars = 'tau')
+
+
+R이 1에가까울수록 그룹간 VAR 크다
+
+library(coda)
+tau_draws <- as.mcmc(posterior, vars='tau')
+sigma_draws <- as.mcmc(posterior, vars='sigma')
+R = tau_draws^2/(tau_draws^2 + sigma_draws^2)
+
+df <- data.frame(R = R)
+ggplot(df, aes(x=R)) +
+  geom_density() +
+  labs(title='Density of R')
+
+
