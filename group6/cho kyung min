@@ -1,0 +1,214 @@
+# 코드 위주
+
+## 8.1 
+
+### a
+#후자가 더 크다
+
+
+### b
+#0 / 양수
+
+
+### d
+#theta 알고있으면 서로 independent
+
+
+
+## 8.3 
+
+library(tidyverse)
+library(dplyr)
+library(runjags)
+library(invgamma)
+library(coda)
+library(ggplot2)
+
+##데이터 준비 
+school = list()
+for(i in 1:8){
+  url = paste0('http://www2.stat.duke.edu/~pdh10/FCBS/Exercises/school', as.character(i), '.dat')
+  school[paste0('school', as.character(i))] = read.csv(url)
+}
+
+school_df <- data_frame(id = seq_along(school), school) %>% unnest %>% as.data.frame()
+colnames(school_df) <- c('school_id', 'score')
+
+## or
+
+schools.list = lapply(1:8, function(i) { 
+  s.tbl = paste0('http://www.stat.washington.edu/people/pdhoff/Book/Data/hwdata/school', i, '.dat') %>% url %>% read.table 
+
+  data.frame( 
+    school = i, 
+    hours = s.tbl[, 1] %>% as.numeric 
+  ) 
+}) 
+
+schools.raw = do.call(rbind, schools.list) 
+
+Y = schools.raw 
+
+
+## a
+
+##Prior
+mu0 <- 7
+g20 <-5
+t20 <-10
+eta0<-2
+s20 <- 15
+nu0<-2
+
+## Matrix for convenience (EX)
+S = 2000
+Thetas = matrix(nrow = S, ncol = 8) 
+coreMat = matrix(nrow = S, ncol = 3) 
+colnames(coreMat) = c('sigma2', 'mu', 'tau2') 
+
+m = length(unique(Y[,1]))
+
+n = sv = ybar = rep(NA, m)
+for (j in 1:m) {
+  Y_j <- Y[Y[,1] == j, 2]
+  ybar[j] <- Y_j
+  sv[j] <- var(Y_j)
+  n[j] <- length(Y_j)
+}
+theta <- ybar
+sigma2 <- mean(theta)
+mu <- mean(theta)
+tau2 <- var(theta)
+
+## SO on..
+effectiveSize(coreMat[,1])
+effectiveSize(coreMat[,2])
+effectiveSize(coreMat[,3])
+
+
+##or
+
+## (CF)
+modelString <- "
+model{
+## likelihood
+for (i in 1:N){
+y[i] ~ dnorm(mu_j[id[i]], invsigma2)
+}
+##hyperprior
+mu ~ dnorm(mu0, 1/g0^2)
+invtau2 ~ dgamma(a_t, b_t)
+tau <- sqrt(pow(invtau2, -1))
+##prior
+for (j in 1:J){
+mu_j[j] ~ dnorm(mu, invtau2)
+}
+invsigma2 ~ dgamma(a_g, b_g)
+sigma <- sqrt(pow(invsigma2, -1))
+}
+"
+
+y <- school_df %>% pull(score)
+id <- school_df %>% pull(school_id)
+N <- length(y)
+J <- length(unique(id))
+
+initsfunction <- function(chain){
+  .RNG.seed <- c(1,2)[chain]
+  .RNG.name <- c('base::Super-Duper',
+                 'base::Wichmann-Hill')[chain]
+  return(list(.RNG.seed=.RNG.seed,
+              .RNG.name=.RNG.name))
+}
+
+the_data <- list('y'=y, 'id'=id, 'N'=N, 'J'=J,
+                 'mu0'=7, 'g0'=sqrt(5),
+                 'a_t'=1, 'b_t'=10,
+                 'a_g'=1, 'b_g'=15)
+
+posterior <- run.jags(modelString,
+                      n.chains = 1,
+                      data = the_data,
+                      monitor = c('mu', 'tau', 'mu_j', 'sigma'),
+                      adapt = 1000,
+                      burnin = 5000,
+                      sample = 5000,
+                      thin = 1,
+                      inits = initsfunction)
+
+
+summary(posterior)
+
+
+## b
+
+## MCMC
+mu_samples <- as.mcmc(posterior, vars='mu')
+mu_samples <- data.frame(mu_samples)$mu
+
+tau_samples <- as.mcmc(posterior, vars='tau')
+tau_samples <- as.numeric(tau_samples)
+
+sigma_samples <- as.mcmc(posterior, vars='sigma')
+sigma_samples <- as.numeric(sigma_samples)
+
+##quantiles
+quant1 <- as.numeric(quantile(mu_samples, c(0.025, 0.975)))
+quant2 <- as.numeric(quantile(tau_samples, c(0.025, 0.975)))
+quant3 <- as.numeric(quantile(sigma_samples, c(0.025, 0.975)))
+quantile_df <- data.frame(mu = quant1, tau = quant2, sigma = quant3)
+rownames(quantile_df) <- c('2.5%', '97.5%')
+quantile_df
+
+
+##정리 & Plot
+samples_df <- data.frame(mu = mu_samples, tau = tau_samples, sigma = sigma_samples)
+
+samples_together <- samples_df %>% gather(parameter, value, c('mu', 'tau', 'sigma'))
+
+ggplot(samples_together, aes(value, color=parameter)) + geom_density() +
+  scale_color_manual(values = c("red", "orange", "purple")) +
+  stat_function(fun=dnorm, args=list(mean=7, sd=sqrt(5)), 
+                colour="red") +
+  stat_function(fun=dinvgamma, args=list(shape=1, rate=15),
+                colour="orange") +
+  stat_function(fun=dinvgamma, args=list(shape=1, rate=10),
+                colour="purple")
+
+
+
+### c
+
+## Variance comparison
+R = tau_samples^2/(tau_samples^2 + sigma_samples^2)
+
+df <- data.frame(R = R)
+ggplot(df, aes(x=R)) +
+  geom_density() +
+  labs(title='Density')
+## Larger Within group variance
+
+
+### d
+
+mu_j_samples <- data.frame(as.mcmc(posterior, vars='mu_j'))
+
+colnames(mu_j_samples) <- c('mu1', 'mu2', 'mu3', 'mu4', 'mu5', 'mu6', 'mu7', 'mu8')
+mu_j_samples %>% transmute(bigger=mu6>mu7) %>% summarize(mean(bigger))
+mu_df <- mu_j_samples %>% transmute(mu7<mu1, mu7<mu2, mu7<mu3, mu7<mu4, mu7<mu5,mu7<mu6, mu7<mu8)
+mean(apply(mu_df, 1, all))
+
+
+mu_df2 <- mu_j_samples %>% transmute(mu4<mu1, mu4<mu2, mu4<mu3, mu4<mu5, mu4<mu6,mu4<mu7, mu4<mu8)
+mean(apply(mu_df2, 1, all))
+
+
+
+### e
+
+Y %>% group_by(school) %>% summarise(mean(hours))
+colSums(Thetas)/nrow(Thetas) 
+
+mean(Y$hours)
+mean(Thetas)
+
