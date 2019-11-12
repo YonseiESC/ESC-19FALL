@@ -1,0 +1,178 @@
+---
+title: "ESC assignmnet 3"
+author: "ahhyun"
+date: '2019 11 12 '
+output: html_document
+---
+
+#### (a)
+```{r,warning=FALSE,message=FALSE}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(coda)
+library(MCMCpack)
+```
+
+```{r}
+schools.list = lapply(1:8, function(i) { 
+  s.tbl = paste0('http://www.stat.washington.edu/people/pdhoff/Book/Data/hwdata/school', i, '.dat') %>% url %>% 
+  read.table
+data.frame( 
+  school = i, 
+  hours = s.tbl[, 1] %>% as.numeric )
+}) 
+schools.raw = do.call(rbind, schools.list) 
+Y = schools.raw 
+```
+
+```{r}
+mu0 = 7 
+g20 = 5 
+t20 = 10 
+eta0 = 2 
+s20 = 15 
+nu0 = 2
+m=length(unique(Y[,1]))
+```
+
+```{R}
+n = sv = ybar = rep(NA, m) 
+for (j in 1:m) { 
+  Y_j = Y[Y[, 1] == j, 2] 
+  ybar[j] = mean(Y_j) 
+  sv[j] = var(Y_j) 
+  n[j] = length(Y_j) 
+  }
+```
+
+```{r}
+theta = ybar 
+sigma2 = mean(sv) 
+mu = mean(theta) 
+tau2 = var(theta)
+```
+
+```{r}
+s=1500
+THETA = matrix(nrow=s,ncol=m)
+smt=matrix(nrow=s,ncol=3)
+colnames(smt)=c('sigma2','mu','tau2')
+```
+
+```{r}
+for (s in 1:s) {
+  for (j in 1:m) {
+    vtheta = 1 / (n[j] / sigma2 + 1 / tau2) 
+    etheta = vtheta * (ybar[j] * n[j] / sigma2 + mu / tau2) 
+    theta[j] = rnorm(1, etheta, sqrt(vtheta)) 
+  }
+  
+nun = nu0 + sum(n) 
+ss = nu0 * s20 
+
+for (j in 1:m) {
+  ss = ss + sum((Y[Y[, 1] == j, 2] - theta[j])^2) 
+  } 
+sigma2 = 1 / rgamma(1, nun / 2, ss / 2)
+
+vmu = 1 / (m / tau2 + 1 /g20) 
+emu = vmu * (m * mean(theta) / tau2 + mu0 / g20) 
+mu = rnorm(1, emu, sqrt(vmu))
+
+etam = eta0 + m 
+ss = eta0 * t20 + sum((theta - mu)^2) 
+tau2 = 1 / rgamma(1, etam / 2, ss / 2)
+
+THETA[s, ] = theta 
+smt[s, ] = c(sigma2, mu, tau2)
+}
+```
+
+### effective sample size
+```{r}
+effectiveSize(smt[, 1])
+effectiveSize(smt[, 2])
+effectiveSize(smt[, 3])
+```
+
+#### (b)
+
+### 95% C.I and mean
+```{r}
+t(apply(smt, MARGIN = 2, FUN = quantile, probs = c(0.025, 0.975)))
+apply(smt,2, mean)
+```
+
+### prior and posterior density
+```{R}
+
+sigma2_prior = data.frame( 
+  value = seq(10, 22.5, by = 0.1), 
+  density = dinvgamma(seq(10, 22.5, by = 0.1), nu0 / 2, nu0 * s20 / 2), 
+  variable = 'sigma2' ) 
+
+tau2_prior = data.frame( 
+  value = seq(0, 30, by = 0.1), 
+  density = dinvgamma(seq(0, 30, by = 0.1), eta0 / 2, eta0 * t20 / 2), 
+  variable = 'tau2' ) 
+
+mu_prior = data.frame( 
+  value = seq(0, 12, by = 0.1), 
+  density = dnorm(seq(0, 12, by = 0.1),  mu0, sqrt(g20)),
+  variable = 'mu' ) 
+
+smt.df = data.frame(smt) 
+cut_size = 10
+smt.df = smt.df %>% tbl_df %>% mutate(scut = cut(s, breaks = cut_size)) %>% gather('variable', 'value', sigma2:tau2) 
+
+priors = rbind(sigma2_prior, tau2_prior, mu_prior) 
+priors$dist = 'prior' 
+smt.df$dist = 'posterior' 
+ggplot(priors, aes(x = value, y = density, color = dist)) + geom_line() + geom_density(data = smt.df, mapping = aes(x = value, y = ..density..))  + facet_wrap(~ variable, scales = 'free')
+```
+
+#### (C)
+```{r}
+t20_prior = (1 / rgamma(1e6, eta0 / 2, eta0 * t20 / 2)) 
+s20_prior = (1 / rgamma(1e6, nu0 / 2, nu0 * s20 / 2)) 
+
+R_prior = data.frame( value = (t20_prior) / (t20_prior + s20_prior)
+                      , dist = 'prior' ) 
+R_post = data.frame( value = smt[, 'tau2'] / (smt[, 'tau2'] + smt[, 'sigma2']), 
+                     dist = 'posterior' ) 
+
+ggplot(R_prior, aes(x = value, y = ..density.., color = dist)) + geom_density(data = R_prior) + geom_density(data = R_post)
+```
+
+```{r}
+mean(R_post$value)
+```
+
+#### (d)
+```{r}
+theta7_lt_6 = THETA[, 7] < THETA[, 6]
+mean(theta7_lt_6)
+
+theta7_smallest = (THETA[, 7] < THETA[, -7]) %>%
+  apply(MARGIN = 1, FUN = all)
+mean(theta7_smallest)
+```
+
+
+#### (e)
+```{r}
+relationship = data.frame( sample_average = ybar, post_exp = colMeans(THETA), school = 1:length(ybar) ) 
+
+relationship
+```
+
+```{r}
+ggplot(relationship, aes(x = sample_average, y = post_exp, label = school)) +
+  geom_text() +
+  geom_abline(slope = 1, intercept = 0) +
+  geom_hline(yintercept = mean(schools.raw[, 'hours']), lty = 2) +
+  annotate('text', x = 10, y = 7.9, label = paste0("Pooled sample mean ", round(mean(schools.raw[, 'hours']), 2))) +
+  geom_hline(yintercept = mean(smt[, 'mu']), color = 'red') +
+  annotate('text', x = 10, y = 7.4, label = paste0("Posterior exp. mu ", round(mean(smt[, 'mu']), 2)), color = 'red')
+```
