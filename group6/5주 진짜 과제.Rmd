@@ -1,0 +1,189 @@
+---
+title: "5주차 과제"
+author: "ESC19"
+date: '2019 11 11 '
+output:
+  pdf_document: default
+  html_document: default
+---
+## 8.1
+  
+a. 아마 후자가 더 클 것으로 생각된다. 왜냐하면 전자는 한 theta와 sigma가 상수로 주어진 상태에서의 분산값이고 후자는 전자의 theta와 sigma도 아직 결정되지 않은 상태에서의 분산값을 의미하기 때문에 편차가 더 클 것 같다.
+  
+b. theta와 sigma가 주어진 상황에서의 공분산 값은 y_i들이 iid하게 뽑히기 때문에 0으로 나올 것 같다. 하지만 theta와 sigma대신에 mu와 tau가 주어진다면 y_i들이 iid하게 뽑힌다고 볼 수 없을 것 같다. 서로 정보를 업데이트 시켜주기 때문에 아마 positive한 값이 나올 것 같다.
+  
+c.
+  
+$Var[y_i,j|θ_i, σ^2] = σ^2$
+  
+$Var[ybar_j|θ_i, σ^2] = σ^2/n_j$
+  
+$Cov[y_1, y_2|θ_i, σ^2] = E[y_1, y_2|θ_i, σ^2] - E[y_1|θ_i, σ^2]E[y_2|θ_i, σ^2]$
+  
+$=E[y_1|θ_i, σ^2]E[y_2|θ_i, σ^2] - E[y_1|θ_i, σ^2]E[y_2|θ_i, σ^2]$ ∵ Independent
+  
+$=0$
+  
+$Var[y_i,j|μ, τ^2] = Var[E(y_i|θ_j, σ^2)|μ, τ^2] + E[Var[y_i|θ_j, σ^2]|μ, τ^2]$ ∵Law of total variance
+  
+$=Var[θ_j|μ, τ^2] + E[σ^2|μ, τ^2]$
+  
+$=τ^2 + σ^2$
+  
+$Var[ybar|μ, τ^2] = Var[E(ybar|θ_j, σ^2)|μ, τ^2] + E[Var(ybar|θ_j, σ^2)|μ, τ^2]$
+  
+$=Var[θ_j|μ, τ^2] + E[σ^2/n_j|μ, τ^2]$
+  
+$=τ^2 + σ^2/n_j$
+  
+d. 
+  
+$P(μ|θ, σ^2, τ^2, Y) = P(μ, θ, σ^2, τ^2, Y)/∫P(μ,θ,σ^2,τ^2,Y)dμ$
+  
+
+## 8.3
+  
+a.
+  
+```{r}
+school1 = scan("http://www2.stat.duke.edu/~pdh10/FCBS/Exercises/school1.dat")
+school2 = scan("http://www2.stat.duke.edu/~pdh10/FCBS/Exercises/school2.dat")
+school3 = scan("http://www2.stat.duke.edu/~pdh10/FCBS/Exercises/school3.dat")
+school4 = scan("http://www2.stat.duke.edu/~pdh10/FCBS/Exercises/school4.dat")
+school5 = scan("http://www2.stat.duke.edu/~pdh10/FCBS/Exercises/school5.dat")
+school6 = scan("http://www2.stat.duke.edu/~pdh10/FCBS/Exercises/school6.dat")
+school7 = scan("http://www2.stat.duke.edu/~pdh10/FCBS/Exercises/school7.dat")
+school8 = scan("http://www2.stat.duke.edu/~pdh10/FCBS/Exercises/school8.dat")
+data = c(school1, school2, school3, school4, school5, school6, school7, school8)
+
+## prior값 설정
+mu0 = 7
+gamma20 = 5
+tau20 = 10
+eta0 = 2
+sigma20 = 15
+nu0 = 2
+sn = 8 # of school
+
+## 초기값 설정
+n = c(length(school1), length(school2), length(school3), length(school4), length(school5), length(school6), length(school7), length(school8))
+ybar = c(mean(school1), mean(school2), mean(school3), mean(school4), mean(school5), mean(school6), mean(school7), mean(school8))
+vari = c(var(school1), var(school2), var(school3), var(school4), var(school5), var(school6), var(school7), var(school8))
+Y = data.frame(school=c(rep(1, times=n[1]), rep(2, times=n[2]), rep(3, times=n[3]), rep(4, times=n[4]), rep(5, times=n[5]), rep(6, times=n[6]), rep(7, times=n[7]), rep(8, times=n[8])), hours=data)
+
+theta = ybar
+sigma2 = mean(vari)
+mu = mean(theta)
+tau2 = var(theta)
+
+## Sampling 하기
+set.seed(123)
+S=5000
+THETA = matrix(nrow=S, ncol=8)
+SMT = matrix(nrow=S, ncol=3)
+
+for(i in 1:S){
+  for(j in 1:8){
+    vtheta = 1/(n[j]/sigma2+1/tau2)
+    etheta = vtheta*(ybar[j]*n[j]/sigma2+mu/tau2)
+    theta[j] = rnorm(1, etheta, sqrt(vtheta))
+  }
+  
+  nun = nu0+sum(n)
+  ss = nu0*sigma20
+  for(j in 1:8){
+    ss=ss+sum((Y[Y[,1]==j, 2]-theta[j])^2)
+  }
+  sigma2=1/rgamma(1, nun/2, ss/2)
+  
+  vmu = 1/(sn/tau2+1/gamma20)
+  emu = vmu*(sn*mean(theta)/tau2 + mu0/gamma20)
+  mu = rnorm(1, emu, sqrt(vmu))
+  
+  etam = eta0+sn
+  ss = eta0 * tau20 + sum((theta-mu)^2)
+  tau2 = 1/rgamma(1, etam/2, ss/2)
+  
+  THETA[i,] = theta
+  SMT[i,] = c(sigma2, mu, tau2)
+}
+library(coda)
+effectiveSize(SMT[, 1])
+effectiveSize(SMT[, 2])
+effectiveSize(SMT[, 3])
+```
+  
+b.
+  
+sigma제곱의 mean, 95%CI
+```{r}
+mean(SMT[, 1])
+quantile(SMT[, 1], c(0.025, 0.975))
+```
+  
+mu의 mean, 95%CI
+```{r}
+mean(SMT[, 2])
+quantile(SMT[, 2], c(0.025, 0.975))
+```
+  
+tau제곱의 mean, 95%CI
+```{r}
+mean(SMT[, 3])
+quantile(SMT[, 3], c(0.025, 0.975))
+```
+  
+c.
+  
+```{r}
+tauprior = 1/rgamma(5000, eta0/2, eta0*tau20/2)
+sigmaprior = 1/rgamma(5000, nu0/2, nu0*sigma20/2)
+
+Rprior = tauprior/(tauprior+sigmaprior)
+Rposterior = SMT[, 3]/(SMT[,3]+SMT[,1])
+Rp1 = density(Rprior)
+plot(Rp1, ylim=c(0, 5))
+Rp2 = density(Rposterior)
+lines(Rp2, col='blue')
+```
+  
+전체 variance중에 그룹간 variance가 차지하는 양이 약 20% 정도를 차지함을 알 수 있다.
+  
+d. 
+  
+θ_6이 θ_7보다 클 확률을 근사해보면
+```{r}
+sum(THETA[,6]>THETA[,7])/S
+```
+약 51.8%가 됨을 알 수 있다.
+  
+또한 θ_7이 다른 모든 θ보다 작은 확률을 근사해보면
+```{r}
+sum(THETA[,7]<THETA[,1] & THETA[,7]<THETA[,2] & THETA[,7]<THETA[,3] & THETA[,7]<THETA[,4] & THETA[,7]<THETA[,5] & THETA[,7]<THETA[,6] & THETA[,7]<THETA[,8])/5000
+```
+약 32%정도가 됨을 알 수 있다.
+  
+e.
+  
+```{r}
+ybarpost = NULL
+plot(1:10, type='n', xlab=c("ybarprior"), ylab=c("ybarposterior"), xlim=c(5, 12), ylim=c(5, 12))
+for(i in 1:8){
+  ybarpost[i] = mean(THETA[,i])
+  points(ybar[i], ybarpost[i], col=i)
+}
+lines(1:12, 1:12)
+legends = c("school1", "school2", "school3", "school4", "school5", "school6", "school7", "school8")
+legend("topleft", legend=legends, col=c(1, 2, 3, 4, 5, 6, 7, 8), pch = c(1, 1), cex=0.5)
+```
+  
+Prior나 Posterior나 둘다 비슷한 값을 갖는다. 하지만 극단값으로 갈수록 둘간에 차이가 조금 발생한다.  마지막으로 전체 평균 비교를 해보면
+  
+```{r}
+lastprior = mean(ybar)
+lastposterior = mean(ybarpost)
+lastprior
+lastposterior
+```
+  
+정말 유사한 것을 확인할 수 있다.
