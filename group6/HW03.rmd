@@ -1,0 +1,198 @@
+---
+title: "Week5HW_TaeHwanOh"
+author: "TaeHwanOh"
+date: '2019-11-11 '
+output: html_document
+---
+
+
+
+## 8.3 
+```{r}
+library(coda)
+library(MCMCpack)
+library(tidyverse)
+Y = list()
+for(i in 1:8){
+  url = paste0('http://www2.stat.duke.edu/~pdh10/FCBS/Exercises/school', as.character(i), '.dat')
+  Y[paste0('school', as.character(i))] = read.csv(url,header = FALSE)
+}
+ 
+Y <- data_frame(id = seq_along(Y), Y) %>% unnest %>% as.data.frame()
+colnames(Y) <- c('school_id', 'score')
+
+
+### weakly inf o rma t i v e p r i o r s
+nu0 <- 2 ; s20<-10
+eta0<-2 ; t20<-10
+mu0<-7 ; g20<-5
+###
+### s t a r t i n g va lue s
+m<-length( unique (Y[ , 1 ] ) )
+n<-sv<-ybar<-rep (NA,m)
+
+for ( j in 1 :m){
+  ybar [ j ]<- mean(Y[Y[ ,1]==j , 2 ] )
+  sv [ j ]<- var (Y[Y[ ,1]==j , 2 ] )
+  n [ j ]<- sum(Y[ ,1]== j )
+
+}
+theta<-ybar ; sigma2<-mean( sv )
+mu<-mean( theta ) ; tau2<-var ( theta )
+###
+### setup MCMC
+set.seed( 1 )
+S<-5000
+THETA<-matrix ( nrow=S , ncol=m)
+SMT<-matrix ( nrow=S , ncol=3)
+###
+### MCMC algor i thm
+for( s in 1 : S){
+  # sample new va lue s o f the the t a s
+  for( j in 1 :m){
+    vtheta <-1/(n [ j ] / sigma2+1/tau2 )
+    etheta<-vtheta*( ybar [ j ] * n [ j ] / sigma2+mu/ tau2 )
+    theta[ j ]<-rnorm( 1 , etheta , sqrt ( vtheta ) )
+  }
+  #sample new value o f sigma2
+  nun<-nu0+sum(n)
+  ss<-nu0*s20
+  for ( j in 1 :m){ 
+    ss<-ss+sum( (Y[Y[ ,1]==j ,2]- theta [ j ] ) ^ 2 )
+    }
+  sigma2<-1/rgamma ( 1 , nun/2 , ss/2)
+  #sample a new value o f mu
+  vmu<- 1/(m/ tau2+1/g20 )
+  emu<- vmu*(m*mean( theta )/ tau2 + mu0/g20 )
+  mu<- rnorm( 1 , emu , sqrt (vmu) )
+  # sample a new value o f tau2
+  etam<-eta0+m
+  ss<- eta0 * t20 + sum( (theta-mu)^2 )
+  tau2<-1/rgamma ( 1 , etam/2 , ss /2)
+  #s t o r e r e s u l t s
+  THETA[ s ,]<-theta
+  SMT[ s ,]<-c ( sigma2 ,mu, tau2 )
+}
+###
+colnames(SMT) <- c('sigma2', 'mu', 'tau2')
+
+par(mfrow=c(3,1))
+acf(SMT[,1])
+acf(SMT[,2]) 
+acf(SMT[,3])
+```
+
+### 잘수렴한다
+
+### ESS 구하기
+```{r}
+#sigma2 ess
+effectiveSize(SMT[,1])
+#mu ess
+effectiveSize(SMT[,2])
+#tau2 ess
+effectiveSize(SMT[,3])
+```
+
+### b
+
+```{r}
+library(coda)
+head(SMT)
+mu_draws <- as.mcmc(SMT[,2])
+mu_draws <- as.numeric(mu_draws)
+
+tau_draws <- as.mcmc(SMT[,3])
+tau_draws <- as.numeric(tau_draws)
+
+sigma_draws <- as.mcmc(SMT[,1])
+sigma_draws <- as.numeric(sigma_draws)
+
+
+temp1 <- as.numeric(quantile(mu_draws, c(0.025, 0.975)))
+
+temp2 <- as.numeric(quantile(tau_draws, c(0.025, 0.975)))
+
+temp3 <- as.numeric(quantile(sigma_draws, c(0.025, 0.975)))
+
+quantile_df <- data.frame(mu = temp1, tau = temp2, sigma = temp3)
+rownames(quantile_df) <- c('2.5%', '97.5%')
+
+quantile_df
+
+```
+
+```{r, warning=FALSE, message=FALSE}
+library(invgamma)
+temp_df <- data.frame(mu = mu_draws, tau = tau_draws, sigma = sigma_draws)
+
+temp_df_long <- temp_df %>% gather(parameter, value, c('mu', 'tau', 'sigma'))
+
+ggplot(temp_df_long, aes(value, color=parameter)) + geom_density() +
+    scale_color_manual(values = c("red", "green", "blue")) +
+    stat_function(fun=dnorm, args=list(mean=7, sd=sqrt(5)), 
+                  colour="red", size=0.5) +
+    stat_function(fun=dinvgamma, args=list(shape=1, rate=15),
+                  colour="green", size=0.5) +
+    stat_function(fun=dinvgamma, args=list(shape=1, rate=10),
+                  colour="blue", size=0.5)
+```
+
+### c
+
+```{r}
+R = tau_draws^2/(tau_draws^2 + sigma_draws^2)
+
+df <- data.frame(R = R)
+ggplot(df, aes(x=R)) +
+  geom_density() +
+  labs(title='Density of R')
+```
+
+그룹들 간의 variance보다는 그룹 내에서의 variance가 더 크다.
+
+### d
+
+$$
+p(\theta_6>\theta_7|\mathcal{D})
+$$
+
+```{r}
+mu_j_draws <- data.frame(as.mcmc(THETA))
+
+colnames(mu_j_draws) <- c('mu1', 'mu2', 'mu3', 'mu4', 'mu5', 'mu6', 'mu7', 'mu8')
+
+mu_j_draws %>% transmute(bigger=mu6>mu7) %>% summarize(mean(bigger))
+
+temp <- mu_j_draws %>% transmute(mu7<mu1, mu7<mu2, mu7<mu3, mu7<mu4, mu7<mu5,
+                                  mu7<mu6, mu7<mu8)
+head(temp)
+
+mean(apply(temp, 1, all))
+```
+
+
+
+### e
+
+```{r}
+samplemean <- Y %>% group_by(school_id) %>% summarize(mean(score))
+plot(samplemean)
+
+thetamean <- matrix(0,8,2)
+for(i in 1:8){
+ thetamean[i,1] <- i
+ thetamean[i,2] <- mean(THETA[,i])
+}
+points(thetamean, col='red')
+```
+
+### 거의 비슷하게 나왔다
+
+```{r}
+mean(Y[,2])
+mean(THETA)
+
+
+```
+### 거의 비슷하게 나왔다
