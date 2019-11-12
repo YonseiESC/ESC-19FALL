@@ -1,0 +1,178 @@
+---
+title: "esc 2019 fall week5 h.w."
+author: "Kwak Hyunji"
+date: "2019년 11월 12일"
+output: html_document
+---
+#8.3
+```{r}
+#used library
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(coda)
+library(MCMCpack)
+```
+```{r}
+schools.list = lapply(1:8, function(i) { 
+  s.tbl = paste0('http://www.stat.washington.edu/people/pdhoff/Book/Data/hwdata/school', i, '.dat') %>% url %>% read.table 
+  
+  data.frame( 
+    school = i, 
+    hours = s.tbl[, 1] %>% as.numeric 
+  ) 
+}) 
+
+schools.raw <-data.frame()
+for (i in 1:8){
+  schools.raw<- rbind(schools.raw,schools.list[[i]])
+}
+Y<-schools.raw
+```
+```{r}
+#prior setting
+mu0<-7; g20<-5; t20<-10; eta0<-2; s20<-15; nu0<-2
+
+# Starting values - use sample mean and variance
+n <- sv <- ybar <- rep(0, 8)
+for (j in 1:8) {
+  Y_j = Y[Y[, 1] == j, 2]
+  ybar[j] = mean(Y_j)
+  sv[j] = var(Y_j) #sv: sample variance
+  n[j] = length(Y_j)
+}
+# Let initial theta estimates be the sample means
+# Let initial values of s2, mu, and t2 be "sample mean and variance"
+theta = ybar
+s2 = mean(sv)
+mu = mean(theta)
+t2 = var(theta)
+```
+
+##a
+```{r}
+#setup MCMC
+set.seed(1)
+S=2000
+THETA = matrix(nrow = S, ncol = 8)
+SMT = matrix(nrow = S, ncol = 3)
+colnames(SMT) = c('sigma', 'mu', 'tau')
+```
+```{r}
+#MCMC algorithm
+for (s in 1:S) {
+  # Sample new values of the thetas
+  for (j in 1:8) {
+    vtheta <- 1 / (n[j] / s2 + 1 / t2)
+    etheta <- vtheta * (ybar[j] * n[j] / s2 + mu / t2)
+    theta[j] <- rnorm(1, etheta, sqrt(vtheta))
+  }
+  
+  # Sample new values of s2
+  nun <- nu0 + sum(n) # TODO: Could cache this
+  ss <- nu0 * s20
+  for (j in 1:8) {
+    ss <- ss + sum((Y[Y[, 1] == j, 2] - theta[j])^2)
+  }
+  s2 <- 1 / rgamma(1, nun / 2, ss / 2)
+  
+  # Sample new values of mu
+  vmu <- 1 / (8 / t2 + 1 /g20)
+  emu <- vmu * (8 * mean(theta) / t2 + mu0 / g20)
+  mu <- rnorm(1, emu, sqrt(vmu))
+  
+  # Sample new values of t2
+  eta8 <- eta0 + 8
+  ss <- eta0 * t20 + sum((theta - mu)^2)
+  t2 <- 1 / rgamma(1, eta8 / 2, ss / 2)
+  
+  # Store params
+  THETA[s, ] = theta
+  SMT[s, ] = c(s2, mu, t2)
+}
+```
+```{r}
+#finding the effective sample size
+effectiveSize(SMT[, 1])
+effectiveSize(SMT[, 2])
+effectiveSize(SMT[, 3])
+```
+
+##b
+```{r}
+#Posterior means and 95%confidence intervals
+mean(SMT[,1]) ;mean(SMT[,2]) ;mean(SMT[,3])
+quantile(SMT[,1], probs = c(0.025, 0.975))
+quantile(SMT[,2], probs = c(0.025, 0.975))
+quantile(SMT[,3], probs = c(0.025, 0.975))
+```
+```{r}
+#Comparing Prior and Posterior
+smt.df <- as.data.frame(SMT)
+s2_prior = data.frame(
+  s2 = seq(10, 22.5, by = 0.1),
+  density_s2 = dinvgamma(seq(10, 22.5, by = 0.1), nu0 / 2, nu0 * s20 / 2)
+)
+t2_prior = data.frame(
+  t2 = seq(0, 30, by = 0.1),
+  density_t2 = dinvgamma(seq(0, 30, by = 0.1), eta0 / 2, eta0 * t20 / 2)
+)
+mu_prior = data.frame(
+  mu = seq(0, 12, by = 0.1),
+  density_mu = dnorm(seq(0, 12, by = 0.1), mu0, sqrt(g20))
+)
+
+ggplot()+
+  geom_line(data = s2_prior, aes(x = s2, y = density_s2,color='prior')) +
+  geom_density(data = smt.df, aes(x=smt.df[,1],color='posterior'))
+ggplot()+
+  geom_line(data = mu_prior, aes(x = mu, y = density_mu,color='prior')) +
+  geom_density(data = smt.df, aes(x=smt.df[,2],color='posterior'))
+ggplot()+
+  geom_line(data = t2_prior, aes(x = t2, y = density_t2,color='prior')) +
+  geom_density(data = smt.df, aes(x=smt.df[,3],color='posterior'))        
+```
+
+
+##c
+```{r}
+t20_prior = (1 / rgamma(nrow(SMT), eta0 / 2, eta0 * t20 / 2))
+s20_prior = (1 / rgamma(nrow(SMT), nu0 / 2, nu0 * s20 / 2))
+R_prior = data.frame(
+  value = (t20_prior) / (t20_prior + s20_prior),
+  dist = 'prior'
+)
+R_post = data.frame(
+  value = SMT[, 3] / (SMT[, 3] + SMT[, 1]),
+  dist = 'posterior'
+)
+ggplot(R_prior, aes(x = value, y = ..density.., color = dist)) +
+  geom_density() +
+  geom_density(data = R_post)
+```
+
+##d
+```{r}
+#theta7<theta6
+sum(THETA[, 7] < THETA[, 6])/nrow(THETA)
+```
+```{r}
+#theta7 is smallest
+sum(apply(THETA[,7]  < THETA[,-7],1,all)) / nrow(THETA)
+```
+##e
+```{r}
+#해결 못함..
+relationship = data.frame(
+  sample_average = ybar,
+  post_exp = colMeans(THETA),
+  school = 1:length(ybar)
+)
+ggplot(relationship, aes(x = sample_average, y = post_exp, label = school)) +
+  geom_text() +
+  geom_abline(slope = 1, intercept = 0) +
+  geom_hline(yintercept = mean(schools.raw[, 'hours']), lty = 2) +
+  annotate('text', x = 10, y = 7.9, label = paste0("Pooled sample mean ", round(mean(schools.raw[, 'hours']), 2))) +
+  geom_hline(yintercept = mean(SMT[, 'mu']), color = 'red') +
+  annotate('text', x = 10, y = 7.4, label = paste0("Posterior exp. mu ", round(mean(SMT[, 'mu']), 2)), color = 'red')
+```
