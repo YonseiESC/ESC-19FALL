@@ -1,0 +1,16 @@
+rapesPerPop
+[1] 0.6559025
+murdPerPop
+[1] 0.5752239
+robbbPerPop
+[1] 0.4615072
+assaultPerPop
+[1] 0.5730109
+burglPerPop
+[1] 0.477318
+larcPerPop
+[1] 0.5920849
+autoTheftPerPop
+[1] 0.5270709
+arsonsPerPop
+[1] 0.7809567
